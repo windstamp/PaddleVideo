@@ -43,7 +43,8 @@ def test_model(cfg, weights, parallel=True):
     cfg.DATASET.test.test_mode = True
     dataset = build_dataset((cfg.DATASET.test, cfg.PIPELINE.test))
     batch_size = cfg.DATASET.get("test_batch_size", 8)
-    places = paddle.set_device('gpu')
+    # places = paddle.set_device('gpu')
+    places = paddle.set_device('npu')
     # default num worker: 0, which means no subprocess will be created
     num_workers = cfg.DATASET.get('num_workers', 0)
     num_workers = cfg.DATASET.get('test_num_workers', num_workers)
