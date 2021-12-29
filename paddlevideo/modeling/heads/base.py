@@ -113,10 +113,20 @@ class BaseHead(nn.Layer):
             raise NotImplemented
 
     def label_smooth_loss(self, scores, labels, **kwargs):
-        labels = F.one_hot(labels, self.num_classes)
-        labels = F.label_smooth(labels, epsilon=self.ls_eps)
-        labels = paddle.squeeze(labels, axis=1)
-        loss = self.loss_func(scores, labels, soft_label=True, **kwargs)
+        """不需要使用soft_label参数的label smooth loss，将计算方式拆成硬标签loss和均匀分布loss加权求和的形式
+
+        Args:
+            scores (paddle.Tensor): [N, num_classes]
+            labels (paddle.Tensor): [N, ]
+
+        Returns:
+            paddle.Tensor: [1,]
+        """
+        ls_eps = 0.1
+        num_classes = scores.shape[-1]
+        hard_loss = (1.0 - ls_eps) * F.cross_entropy(scores, labels)
+        uniform_loss = (ls_eps / num_classes) * (-F.log_softmax(scores, -1).sum(-1).mean(0))
+        loss = hard_loss + uniform_loss
         return loss
 
     def get_acc(self, scores, labels, valid_mode):
