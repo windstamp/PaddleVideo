@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import time
+import os
 import os.path as osp
 import sys
 from pathlib import Path
@@ -20,6 +21,7 @@ import numpy as np
 import paddle
 import paddle.distributed as dist
 import paddle.distributed.fleet as fleet
+import paddle.fluid.profiler as pd_profiler
 from ..loader.builder import build_dataloader, build_dataset
 from ..modeling.builder import build_model
 from ..solver import build_lr, build_optimizer
@@ -150,6 +152,7 @@ def train_model(cfg,
                                        decr_every_n_nan_or_inf=1)
 
     best = 0.
+    global_step = 0
     for epoch in range(0, cfg.epochs):
         if epoch < resume_epoch:
             logger.info(
@@ -161,62 +164,71 @@ def train_model(cfg,
         record_list = build_record(cfg.MODEL)
         tic = time.time()
         for i, data in enumerate(train_loader):
-            record_list['reader_time'].update(time.time() - tic)
+            global_step = global_step + 1
 
-            # Collect performance information when profiler_options is activate
-            add_profiler_step(profiler_options)
+            if global_step >= 100 and global_step < 110:
+                output_file = os.getcwd() + '/' + 'npu_prof' + '/samples'
+            else:
+                output_file = os.getcwd() + '/' + 'npu_prof' + '/ignore'
+            os.makedirs(output_file, exist_ok=True)
 
-            # 4.1 forward
+            with pd_profiler.npu_profiler(output_file) as npu_prof:
+                record_list['reader_time'].update(time.time() - tic)
 
-            ###AMP###
-            if amp:
-                with paddle.amp.auto_cast(custom_black_list={"reduce_mean"}):
+                # Collect performance information when profiler_options is activate
+                add_profiler_step(profiler_options)
+
+                # 4.1 forward
+
+                ###AMP###
+                if amp:
+                    with paddle.amp.auto_cast(custom_black_list={"reduce_mean"}):
+                        outputs = model(data, mode='train')
+
+                    avg_loss = outputs['loss']
+                    scaled = scaler.scale(avg_loss)
+                    scaled.backward()
+                    # keep prior to 2.0 design
+                    scaler.minimize(optimizer, scaled)
+                    optimizer.clear_grad()
+
+                else:
                     outputs = model(data, mode='train')
 
-                avg_loss = outputs['loss']
-                scaled = scaler.scale(avg_loss)
-                scaled.backward()
-                # keep prior to 2.0 design
-                scaler.minimize(optimizer, scaled)
-                optimizer.clear_grad()
+                    # 4.2 backward
+                    if use_gradient_accumulation and i == 0:  # Use gradient accumulation strategy
+                        optimizer.clear_grad()
+                    avg_loss = outputs['loss']
+                    avg_loss.backward()
 
-            else:
-                outputs = model(data, mode='train')
-
-                # 4.2 backward
-                if use_gradient_accumulation and i == 0:  # Use gradient accumulation strategy
-                    optimizer.clear_grad()
-                avg_loss = outputs['loss']
-                avg_loss.backward()
-
-                # 4.3 minimize
-                if use_gradient_accumulation:  # Use gradient accumulation strategy
-                    if (i + 1) % cfg.GRADIENT_ACCUMULATION.num_iters == 0:
-                        for p in model.parameters():
-                            p.grad.set_value(
-                                p.grad / cfg.GRADIENT_ACCUMULATION.num_iters)
+                    # 4.3 minimize
+                    if use_gradient_accumulation:  # Use gradient accumulation strategy
+                        if (i + 1) % cfg.GRADIENT_ACCUMULATION.num_iters == 0:
+                            for p in model.parameters():
+                                p.grad.set_value(
+                                    p.grad / cfg.GRADIENT_ACCUMULATION.num_iters)
+                            optimizer.step()
+                            optimizer.clear_grad()
+                    else:  # Common case
                         optimizer.step()
                         optimizer.clear_grad()
-                else:  # Common case
-                    optimizer.step()
-                    optimizer.clear_grad()
 
-            # log record
-            record_list['lr'].update(optimizer.get_lr(), batch_size)
-            for name, value in outputs.items():
-                record_list[name].update(value, batch_size)
+                # log record
+                record_list['lr'].update(optimizer.get_lr(), batch_size)
+                for name, value in outputs.items():
+                    record_list[name].update(value, batch_size)
 
-            record_list['batch_time'].update(time.time() - tic)
-            tic = time.time()
+                record_list['batch_time'].update(time.time() - tic)
+                tic = time.time()
 
-            if i % cfg.get("log_interval", 10) == 0:
-                ips = "ips: {:.5f} instance/sec.".format(
-                    batch_size / record_list["batch_time"].val)
-                log_batch(record_list, i, epoch + 1, cfg.epochs, "train", ips)
+                if i % cfg.get("log_interval", 10) == 0:
+                    ips = "ips: {:.5f} instance/sec.".format(
+                        batch_size / record_list["batch_time"].val)
+                    log_batch(record_list, i, epoch + 1, cfg.epochs, "train", ips)
 
-            # learning rate iter step
-            if cfg.OPTIMIZER.learning_rate.get("iter_step"):
-                lr.step()
+                # learning rate iter step
+                if cfg.OPTIMIZER.learning_rate.get("iter_step"):
+                    lr.step()
 
         # learning rate epoch step
         if not cfg.OPTIMIZER.learning_rate.get("iter_step"):
