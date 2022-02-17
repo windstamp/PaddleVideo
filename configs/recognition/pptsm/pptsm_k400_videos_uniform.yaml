@@ -13,21 +13,21 @@ MODEL: #MODEL field
         ls_eps: 0.1
 
 DATASET: #DATASET field
-    batch_size: 16  #Mandatory, bacth size
+    batch_size: 8  #Mandatory, bacth size
     num_workers: 4 #Mandatory, the number of subprocess on each GPU.
     test_batch_size: 1
     train:
         format: "VideoDataset" #Mandatory, indicate the type of dataset, associate to the 'paddlevidel/loader/dateset'
-        data_prefix: "data/k400/videos" #Mandatory, train data root path
-        file_path: "data/k400/train.list" #Mandatory, train data index file path
+        data_prefix: "/paddle/datasets/k400/videos" #Mandatory, train data root path
+        file_path: "/paddle/datasets/k400/train.list" #Mandatory, train data index file path
     valid:
         format: "VideoDataset" #Mandatory, indicate the type of dataset, associate to the 'paddlevidel/loader/dateset'
-        data_prefix: "data/k400/videos" #Mandatory, train data root path
-        file_path: "data/k400/val.list" #Mandatory, valid data index file path
+        data_prefix: "/paddle/datasets/k400/videos" #Mandatory, train data root path
+        file_path: "/paddle/datasets/k400/val.list" #Mandatory, valid data index file path
     test:
         format: "VideoDataset" #Mandatory, indicate the type of dataset, associate to the 'paddlevidel/loader/dateset'
-        data_prefix: "data/k400/videos" #Mandatory, train data root path
-        file_path: "data/k400/val.list" #Mandatory, valid data index file path
+        data_prefix: "/paddle/datasets/k400/videos" #Mandatory, train data root path
+        file_path: "/paddle/datasets/k400/val.list" #Mandatory, valid data index file path
 
 PIPELINE: #PIPELINE field
     train: #Mandotary, indicate the pipeline to deal with the training data, associate to the 'paddlevideo/loader/pipelines/'
